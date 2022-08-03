@@ -4,6 +4,17 @@ As this is my first foray into optimizing memory accessed and what not in Go, I 
 
 == 2022-08-03: More deep-diving on the TLB effect of the __CompareNMask function call
 
+TODO: Check up on
+- TLB misses for the 1M case.
+- the fill-ratio
+
+Looked into
+- TLB misses around the __CompareNMask call (more verification there)
+- Checked whether the Go tracing could be helpful (it did)
+
+
+-- TLB misses
+
 By fetching the bucket.entries before and after the CompareNMask call, we can see where fetching the memory
 costs something. And it does seem that fetching bucket.entries after the call does cost something.
 
@@ -15,14 +26,69 @@ This is from `findGet` via `go test -run=^\$ -cpu 1 -count 1 -bench 'read_id/8/c
 ```
 In the above we can see that the first `bEntries := &bucket.entries` does not cost anything, whereas the second `bEntries = &bucket.entries` does cost 70ms (out of roughly 690ms inside this function, or 10%).
 
+TODO: Look into what perf says about the above
 
-TODO: Check up on
-- TLB misses for the 1M case.
-- the fill-ratio
-- how the Go Scheduler and GC
+-- Go traces
+Looking at the Go traces it was obvious that the setup of the tests, where each subtest would create random keys, everytime it was run, was not beneficial. So I refactored the tests to create random key slices for each required size and use that.
 
+These were the commands:
+```
+$ go test -trace trace_cay.out -run=^\$ -cpu 1 -count 1 -bench 'read_not_found_dyn/1m/caymap'
+# Start trace:
+$ go tool trace --http :1235 trace_cay.out
+```
+(Do similarly for builtin)
 
-== 2021-03-30: Try memory ballast
+Running the benchmarks again we get:
+
+```
+# Not found cases:
+$ go test -run=^\$ -cpu 1 -count 10 -bench 'read_not_found' | tee ~/cay_not_found_results.txt
+$ benchstat ~/cay_not_found_results.txt
+name                                     time/op
+_read_not_found_dynamic/8/caymap         14.1ns ± 2%
+_read_not_found_dynamic/8/builtin        12.1ns ± 3%
+_read_not_found_dynamic/1k/caymap        17.1ns ± 1%
+_read_not_found_dynamic/1k/builtin       18.1ns ± 3%
+_read_not_found_dynamic/32k/caymap       24.3ns ± 9%
+_read_not_found_dynamic/32k/builtin      26.8ns ± 5%
+_read_not_found_dynamic/512k/caymap      65.3ns ± 9%
+_read_not_found_dynamic/512k/builtin     78.5ns ± 9%
+_read_not_found_dynamic/1m/caymap        80.7ns ± 3%
+_read_not_found_dynamic/1m/builtin       86.8ns ±13%
+_read_not_found_static_key/8/caymap      13.5ns ± 3%
+_read_not_found_static_key/8/builtin     12.3ns ± 4%
+_read_not_found_static_key/1k/caymap     13.2ns ± 2%
+_read_not_found_static_key/1k/builtin    14.7ns ± 3%
+_read_not_found_static_key/32k/caymap    13.3ns ± 2%
+_read_not_found_static_key/32k/builtin   14.7ns ± 2%
+_read_not_found_static_key/512k/caymap   13.6ns ± 3%
+_read_not_found_static_key/512k/builtin  14.9ns ± 4%
+_read_not_found_static_key/1m/caymap     13.3ns ± 2%
+_read_not_found_static_key/1m/builtin    14.7ns ± 5%
+```
+Caymap is faster for all cases, except the 8byte cases.
+
+For the found case, builint is faster in all cases, except 32K keys:
+```
+$ go test -run=^\$ -cpu 1 -count 10 -bench 'read_iden' | tee ~/cay_identical_found_results.txt
+$ benchstat ~/cay_identical_found_results.txt
+name                                      time/op
+_read_identical_string_keys/8/caymap      18.0ns ± 4%
+_read_identical_string_keys/8/builtin     10.6ns ± 1%
+_read_identical_string_keys/1k/caymap     21.4ns ± 3%
+_read_identical_string_keys/1k/builtin    14.9ns ± 2%
+_read_identical_string_keys/32k/caymap    31.8ns ± 3%
+_read_identical_string_keys/32k/builtin   39.3ns ± 1%
+_read_identical_string_keys/512k/caymap    100ns ± 6%
+_read_identical_string_keys/512k/builtin  94.7ns ± 4%
+_read_identical_string_keys/1m/caymap      118ns ± 6%
+_read_identical_string_keys/1m/builtin     100ns ± 6%
+```
+I wonder if we look into the fill ratio to see if the amount of memory used for caymap vs. builtin could
+be interesting.
+
+## 2021-03-30: Try memory ballast
 Adding some memory ballast in the form of
 ```
 var (
@@ -37,7 +103,7 @@ Changing the number of entries in the map makes a big difference, as for all map
 Maybe the type should be changes to `map<string, int>`, which is what Matt Kulundis from Google is using to benchmark his types. He has two set-ups, one with a 4 byte key/value and one with 64 bytes (he is only looking at sets, where the key and value is the same).
 
 
-== 2020-01-14: Look into the cache misses
+## 2020-01-14: Look into the cache misses
 
 Generally, where the code is using the most cpu-cycles is also where there are cache misses, so I want to know what type of cache miss it is. E.g., TLB/L1/L2, etc. On the host, the L1 is 32K.
 
@@ -126,8 +192,7 @@ Buckets: 131072, of which 1106 are full
 PASS
 ```
 
-
-== 2020-01-11 Stack-allocating the bucket
+## 2020-01-11 Stack-allocating the bucket
 
 If using `grp := m.buckets[cGroup]`, I would have hoped that the bucket would have been allocated on the stack. From the generated byte code, it does not seem to be case, as `runtime.newobject` is called along with `runtime.duffcopy` and ` runtime.typedmemmove`, so maybe the Go compiler thinks that the bucket escapes and thus is allocated on the heap. (`newobject` is the same as malloc).
 
@@ -180,7 +245,7 @@ Confirmed with the test case `Test__FirstBucketIsPageAligned`, that the buckets 
 
 Maybe the second TLB miss, which stands for 13% of the misses in `find()` is okay? Can I find optimizations somewhere else?
 
-== 2021-01-08 Debugging TLB misses for get tests
+## 2021-01-08 Debugging TLB misses for get tests
 
 Not-found tests
 ---------------
@@ -301,7 +366,7 @@ Interesting, replacing `ekeyP := (*z.StringStruct)(unsafe.Pointer(&grp.keys[i]))
 Hence next step is to figure out whether I really need `grp := &m.buckets[cGroup]` or it should be `grp := m.buckets[cGroup]`
 
 
-== Run 2020-11-30
+## Run 2020-11-30
 
 
 ```
@@ -431,9 +496,7 @@ get a Linux box to test perf on.
 
 My current thesis is the more bound checks in the simd code, causes more TLB cache invalidations.
 
-
-
-== Run date not known
+## Run date not known
 
 
 - Not inlining a function can add up to 4ns

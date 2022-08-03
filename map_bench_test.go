@@ -30,6 +30,15 @@ var (
 		_512K: "512k",
 		_1M:   "1m",
 	}
+
+	// Initialized this map up front, to avoid it taking up the traces
+	_keysMap = func() map[int][]string {
+		toRet := make(map[int][]string, len(_allNames))
+		for _, val := range _allSizes {
+			toRet[val] = RandomKeys(val)
+		}
+		return toRet
+	}()
 )
 
 // To try out adding more memory, to reduce GC.
@@ -66,8 +75,7 @@ func Benchmark_read_identical_string_keys(b *testing.B) {
 	for _, val := range _allSizes {
 		valToUse := val
 		b.Run(_allNames[val], func(b *testing.B) {
-			keys := RandomKeys(valToUse)
-			compareCayAndBuiltin(b, keys, id, true)
+			compareCayAndBuiltin(b, _keysMap[valToUse], id, true)
 		})
 	}
 }
@@ -76,8 +84,7 @@ func Benchmark_read_not_found_dynamic(b *testing.B) {
 	for _, val := range _allSizes {
 		valToUse := val
 		b.Run(_allNames[val], func(b *testing.B) {
-			keys := RandomKeys(valToUse)
-			compareCayAndBuiltin(b, keys, func(keys []string) []string {
+			compareCayAndBuiltin(b, _keysMap[valToUse], func(keys []string) []string {
 				return RandomKeysWithSuffix(len(keys), "1")
 			}, false)
 		})
@@ -88,8 +95,7 @@ func Benchmark_read_not_found_static_key(b *testing.B) {
 	for _, val := range _allSizes {
 		valToUse := val
 		b.Run(_allNames[val], func(b *testing.B) {
-			keys := RandomKeys(valToUse)
-			compareCayAndBuiltin(b, keys, func(keys []string) []string {
+			compareCayAndBuiltin(b, _keysMap[valToUse], func(keys []string) []string {
 				return []string{notFoundKey}
 			}, false)
 		})
@@ -97,13 +103,11 @@ func Benchmark_read_not_found_static_key(b *testing.B) {
 }
 
 func Benchmark_read_fresh_string_keys(b *testing.B) {
-	keys := RandomKeys(_32K)
-	compareCayAndBuiltin(b, keys, stringCopy, true)
+	compareCayAndBuiltin(b, _keysMap[_32K], stringCopy, true)
 }
 
 func Benchmark_read_fresh_string_random_order_keys(b *testing.B) {
-	keys := RandomKeys(_32K)
-	compareCayAndBuiltin(b, keys, stringCopyRandomOrder, true)
+	compareCayAndBuiltin(b, _keysMap[_32K], stringCopyRandomOrder, true)
 }
 
 func compareCayAndBuiltin(b *testing.B, keys []string, m func(keys []string) []string, present bool) {
@@ -118,8 +122,6 @@ func compareCayAndBuiltin(b *testing.B, keys []string, m func(keys []string) []s
 	// Such that we can set the mask to length minus one.
 	lenMask := len(keys) - 1
 	var lenKept int
-	// To reduce GC impact, we turn it off here.
-	runtime.GC()
 	debug.SetGCPercent(-1)
 	b.ResetTimer()
 

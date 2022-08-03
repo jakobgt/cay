@@ -52,10 +52,6 @@ func (m *Map[V]) findGet(key string) (*V, bool) {
 		// I wonder whether this call could mess up the TLB?
 		idx := __CompareNMask(grpCtrlPointer, unsafe.Pointer(hash>>57))
 		bEntries := &bucket.entries
-		// bKey := bEntries[0].key
-		// bKey = bEntries[4].key
-		// bKey = bEntries[8].key
-		// bKey = bEntries[12].key
 
 		// IDX has 1 in its bit representation for every match, and so we iterate each of these
 		// positions.

@@ -17,9 +17,10 @@ const (
 	notFoundKey = "abcdefghijklmnopqrstuva123456789"
 )
 
-var (
-	_ballast = make([]byte, int64(1)<<int64(33)) // 8GB
-)
+// To try out adding more memory, to reduce GC.
+// var (
+// 	_ballast = make([]byte, int64(1)<<int64(33)) // 8GB
+// )
 
 //var _ = func() int {
 //	fmt.Println("sleeping")
@@ -36,150 +37,85 @@ var (
 //
 //}
 
-// func Benchmark_string_len(b *testing.B) {
-// 	keys := RandomKeys(entries)
-// 	b.ResetTimer()
-// 	for n := 0; n < b.N; n++ {
-// 		entry := n & lenMask
-// 		foo := len(keys[entry])
-// 		if foo < 0 {
-// 			panic("did not find element")
-// 		}
-// 	}
-// }
-
-// func Benchmark_string_len_reverse(b *testing.B) {
-// 	keys := RandomKeys(entries)
-// 	b.ResetTimer()
-// 	for n := 0; n < b.N; n++ {
-// 		entry := (b.N - n) & lenMask
-// 		foo := len(keys[entry])
-// 		if foo+1 < 0 {
-// 			panic("did not find element")
-// 		}
-// 	}
-// }
-
-// func Benchmark_string_struct_len_reverse(b *testing.B) {
-// 	keys := RandomKeys(entries)
-// 	b.ResetTimer()
-// 	for n := 0; n < b.N; n++ {
-// 		entry := (b.N - n) & lenMask
-// 		s := (*z.StringStruct)(noescape(unsafe.Pointer(&keys[entry])))
-// 		if s.Len+1 < 0 {
-// 			panic("did not find element")
-// 		}
-// 	}
-// }
-
 var _lenKept int
 var _vKept byte
 
-func Benchmark_simdmap_get(b *testing.B) {
-	keys := RandomKeys(entries)
-	m := Simdmap(keys)
-	fKeys := make([]string, entries)
-	randomOrderKeys := make([]string, entries)
+func id(keys []string) []string {
+	return keys
+}
+
+func stringCopy(keys []string) []string {
+ 	fKeys := make([]string, entries)
 
 	for i, s := range keys {
 		fKeys[i] = fmt.Sprintf(s)
-		randomOrderKeys[i] = fmt.Sprintf(s)
+	}
+	return fKeys
+}
+
+func stringCopyRandomOrder(keys []string) []string {
+ 	fKeys := make([]string, entries)
+
+	for i, s := range keys {
+		fKeys[i] = fmt.Sprintf(s)
 	}
 	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(fKeys), func(i, j int) { randomOrderKeys[i], randomOrderKeys[j] = randomOrderKeys[j], randomOrderKeys[i] })
+	rand.Shuffle(len(keys), func(i, j int) { fKeys[i], fKeys[j] = fKeys[j], fKeys[i] })
 
+	return fKeys
+}
+
+func Benchmark_read_identical_string_keys(b *testing.B) {
+	keys := RandomKeys(entries)
+	compareCayAndBuiltin(b, keys, id)
+}
+
+func Benchmark_read_fresh_string_keys(b *testing.B) {
+	keys := RandomKeys(entries)
+	compareCayAndBuiltin(b, keys, stringCopy)
+}
+
+func Benchmark_read_fresh_string_random_order_keys(b *testing.B) {
+	keys := RandomKeys(entries)
+	compareCayAndBuiltin(b, keys, stringCopyRandomOrder)
+}
+
+func compareCayAndBuiltin(b *testing.B, keys []string, m func(keys []string) []string) {
+	b.Helper()
+	caymap := Simdmap(keys)
+	val := bmap(keys)
+
+	// We now update the set of keys to lookup via
+	keys = m(keys)
 	var lenKept int
+	// To reduce GC impact, we turn it off here.
 	runtime.GC()
 	debug.SetGCPercent(-1)
 	b.ResetTimer()
-	b.Run("same keys", func(b *testing.B) {
+
+	b.Run("caymap", func(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			entry := n & lenMask
-			v, ok := m.Get(keys[entry])
+			v, ok := caymap.Get(keys[entry])
 			lenKept = len(v)
 			if !ok {
-				fmt.Println(v)
 				panic("did not find element")
 			}
 		}
 	})
 
-	b.Run("same but fresh keys", func(b *testing.B) {
-		for n := 0; n < b.N; n++ {
-			entry := n & lenMask
-			v, ok := m.Get(fKeys[entry])
-			lenKept = len(v)
-			if !ok {
-				fmt.Println(v)
-			}
-		}
-	})
-
-	b.Run("same, fresh and random order keys", func(b *testing.B) {
-		for n := 0; n < b.N; n++ {
-			entry := n & lenMask
-			v, ok := m.Get(randomOrderKeys[entry])
-			lenKept = len(v)
-			if !ok {
-				fmt.Println(v)
-			}
-		}
-	})
-	_lenKept = lenKept
-}
-
-func Benchmark_builtin_map_get(b *testing.B) {
-	keys := RandomKeys(entries)
-	val := bmap(keys)
-	fKeys := make([]string, entries)
-	randomOrderKeys := make([]string, entries)
-
-	for i, s := range keys {
-		fKeys[i] = fmt.Sprintf(s)
-		randomOrderKeys[i] = fmt.Sprintf(s)
-	}
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(fKeys), func(i, j int) { randomOrderKeys[i], randomOrderKeys[j] = randomOrderKeys[j], randomOrderKeys[i] })
-
-	runtime.GC()
-	var lenKept int
-	b.ResetTimer()
-
-	debug.SetGCPercent(-1)
-	b.Run("same keys", func(b *testing.B) {
+	b.Run("builtin", func(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			entry := n & lenMask
 			v, ok := val[keys[entry]]
 			lenKept = len(v)
 			if !ok {
-				fmt.Println(v)
 				panic("did not find element")
 			}
 		}
 	})
 
-	b.Run("same but fresh keys", func(b *testing.B) {
-		for n := 0; n < b.N; n++ {
-			entry := n & lenMask
-			v, ok := val[fKeys[entry]]
-			lenKept = len(v)
-			if !ok {
-				fmt.Println(v)
-			}
-		}
-	})
-
-	b.Run("same, fresh and random order keys", func(b *testing.B) {
-		for n := 0; n < b.N; n++ {
-			entry := n & lenMask
-			v, ok := val[randomOrderKeys[entry]]
-			lenKept = len(v)
-			if !ok {
-				fmt.Println(v)
-			}
-		}
-	})
-	_lenKept = lenKept
+	runtime.KeepAlive(lenKept)
 }
 
 func Benchmark_builtin_map_get_not_found(b *testing.B) {

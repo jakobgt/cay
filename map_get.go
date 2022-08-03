@@ -7,8 +7,9 @@ import (
 	"github.com/jakobgt/cay/z"
 )
 
+// Get returns the entry with the given key and a bool if the key was found.
 func (m *Map) Get(key string) ([]byte, bool) {
-	grp, val := m.find_get(key)
+	grp, val := m.findGet(key)
 
 	if grp == _notFound {
 		return nil, false
@@ -25,9 +26,8 @@ const (
 	PtrSize = 4 << (^uintptr(0) >> 63)
 )
 
-// find_get returns the position of the key in the map. You need to pass in the bucket and mask of the
-// key, as returned from hashKey
-func (m *Map) find_get(key string) (group uintptr, value *[]byte) {
+// findGet returns the position of the key in the map.
+func (m *Map) findGet(key string) (group uintptr, value *[]byte) {
 	// Manually inlining the hashKey function as the Go compiler won't
 	keyP := (*z.StringStruct)(unsafe.Pointer(&key))
 

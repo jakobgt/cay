@@ -2,7 +2,7 @@
 
 As this is my first foray into optimizing memory accessed and what not in Go, I try to document my findings here (also to flush my mental cach).
 
-== 2022-08-03: More deep-diving on the TLB effect of the __CompareNMask function call
+## 2022-08-03: More deep-diving on the TLB effect of the __CompareNMask function call
 
 TODO: Check up on
 - TLB misses for the 1M case.
@@ -13,7 +13,7 @@ Looked into
 - Checked whether the Go tracing could be helpful (it did)
 
 
--- TLB misses
+### TLB misses
 
 By fetching the bucket.entries before and after the CompareNMask call, we can see where fetching the memory
 costs something. And it does seem that fetching bucket.entries after the call does cost something.
@@ -28,7 +28,7 @@ In the above we can see that the first `bEntries := &bucket.entries` does not co
 
 TODO: Look into what perf says about the above
 
--- Go traces
+### Go traces
 Looking at the Go traces it was obvious that the setup of the tests, where each subtest would create random keys, everytime it was run, was not beneficial. So I refactored the tests to create random key slices for each required size and use that.
 
 These were the commands:
@@ -124,7 +124,7 @@ This is really weird, as the host has a 32KB L1 cache, 256KB L2 cache and a 20MB
 TODO: Try to disable GC during the test runs. That might avoid the GC. Look for deltablue benchmarks, that were used in V8/Dart, etc.
 
 
-== 2020-01-13 Caching the returned pointer
+## 2020-01-13 Caching the returned pointer
 
 It seems that we can't optimize `find` that much more, where we have to accept the second round of TLB misses, when inspecting the length of the keys. Maybe we can optimize the case where the key is found and then making sure that, once we return the value pointer we don't hit a third TLB miss there?
 

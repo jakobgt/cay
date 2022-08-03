@@ -72,7 +72,7 @@ func Benchmark_read_identical_string_keys(b *testing.B) {
 	}
 }
 
-func Benchmark_read_not_found(b *testing.B) {
+func Benchmark_read_not_found_dynamic(b *testing.B) {
 	for _, val := range _allSizes {
 		valToUse := val
 		b.Run(_allNames[val], func(b *testing.B) {

@@ -41,6 +41,7 @@ func (m *Map[V]) findGet(key string) (*V, bool) {
 	//bMask := bucketMask(m.logSize)
 	bMask := bucketMask(m.logSize)
 	sGroup := hash & bMask // Equal to hash & m.slotMask / 16
+	//var bEntries *[_slotsPerGroup]entry[V]
 
 	for cGroup := sGroup; cGroup < uintptr(len(m.buckets)); cGroup = (cGroup + 1) & bMask {
 		//	for cGroup := sGroup; cGroup < uintptr(len(m.buckets)); cGroup = (cGroup + 1) & bMask {
@@ -50,8 +51,10 @@ func (m *Map[V]) findGet(key string) (*V, bool) {
 		// It might seem that __CompareNMask takes a long time, but that is because it hits a
 		// TLB miss.
 		// I wonder whether this call could mess up the TLB?
-		idx := __CompareNMask(grpCtrlPointer, unsafe.Pointer(hash>>57))
 		bEntries := &bucket.entries
+		//runtime.KeepAlive(bEntries)
+		idx := __CompareNMask(grpCtrlPointer, unsafe.Pointer(hash>>57))
+		//bEntries = &bucket.entries
 
 		// IDX has 1 in its bit representation for every match, and so we iterate each of these
 		// positions.
@@ -101,7 +104,7 @@ func (m *Map[V]) findGet(key string) (*V, bool) {
 
 		// Check whether any slot in the bucket is empty. If so we've found our bucket
 		if !bucket.full {
-			break
+			return (*V)(nil), false
 		}
 	}
 	// We did not find the values

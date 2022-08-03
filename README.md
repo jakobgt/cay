@@ -72,15 +72,15 @@ TODO
 - Investigate page alignment
 
 References
-- HashBrown and SwissTable
+#### HashBrown and SwissTable
  - Run-through of the SIMD hash table: https://blog.waffles.space/2018/12/07/deep-dive-into-hashbrown/
  - Explanation of the rust version of SwissTable: https://gankra.github.io/blah/hashbrown-insert/
  - Code of the Simd Map implementation in Rust: https://sourcegraph.com/github.com/Amanieu/hashbrown@master/-/blob/src/raw/mod.rs#L444:19
 - Google Presentation on SwissTable: https://www.youtube.com/watch?v=ncHmEUmJZf4 - code is in https://github.com/abseil/abseil-cpp/blob/master/absl/container/internal/raw_hash_set.h
 
-- Bit operations
+#### Bit operations
  - Fast bitset iteration: https://lemire.me/blog/2018/02/21/iterating-over-set-bits-quickly/
 
-- Calling ASM in Go
+#### Calling ASM in Go
  - Optimizing stuff: https://medium.com/@c_bata_/optimizing-go-by-avx2-using-auto-vectorization-in-llvm-118f7b366969
  - Intrinsics in Golang: https://dave.cheney.net/2019/08/20/go-compiler-intrinsics

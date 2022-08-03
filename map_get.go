@@ -68,6 +68,8 @@ func (m *Map) findGet(key string) (group uintptr, value *[]byte) {
 		// More info in https://lemire.me/blog/2018/02/21/iterating-over-set-bits-quickly/
 		for idx != 0 {
 			i := bits.TrailingZeros16(idx)
+			// Somewhat annoying, but here we get a bounds check on i and bEntries, even though
+			// i is always lower than len(bEntries). Maybe we can just look it up directly
 			entry := &bEntries[i]
 			bKey := entry.key
 			//ctrl = bucket.controls
@@ -80,7 +82,7 @@ func (m *Map) findGet(key string) (group uintptr, value *[]byte) {
 			//ekeyP := (*z.StringStruct)(add(unsafe.Pointer(&bucket.entries), uintptr(i)*entrySize+keyOffset))
 
 			// This comparison might seem slow, but it is because the ekeyP.Len hits a TLB miss ~16% of the
-			// time. Unsure why.
+			// time. Unsure why (the page that ekeyP is part of should have been loaded with __CompareNMask).
 			// Furthermore this causes 77% of the total cache misses (in just this function - 1818 samples, whereas the
 			// the __CompareNMask accounts for 1752 cache misses -excluding TLB misses. )
 			if keyP.Len != ekeyP.Len {

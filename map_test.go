@@ -21,14 +21,14 @@ func Test__BMap(t *testing.T) {
 }
 
 func Test__Map(t *testing.T) {
-	m := NewMap(128)
+	m := NewMap[[]byte](128)
 
 	_, ok := m.Get("foobar")
 	assert.False(t, ok)
 }
 
 func Test__FirstBucketIsPageAligned(t *testing.T) {
-	m := NewMap(128)
+	m := NewMap[[]byte](128)
 
 	_, ok := m.Get("foobar")
 	assert.False(t, ok)
@@ -38,7 +38,7 @@ func Test__FirstBucketIsPageAligned(t *testing.T) {
 }
 
 func Test__FirstKeyEntryIsSameAddressAsKeys(t *testing.T) {
-	m := NewMap(128)
+	m := NewMap[[]byte](128)
 
 	_, ok := m.Get("foobar")
 	assert.False(t, ok)
@@ -62,9 +62,9 @@ func Test__SizeOfByteSlice(t *testing.T) {
 	fmt.Printf("\"\": %d\n", unsafe.Sizeof(""))
 	fmt.Printf("\"foobar\": %d\n", unsafe.Sizeof("foobar"))
 	fmt.Printf("aStruct: %d\n", unsafe.Sizeof(aStruct{}))
-	fmt.Printf("bucket: %d\n", unsafe.Sizeof(bucket{}))
+	fmt.Printf("bucket: %d\n", unsafe.Sizeof(bucket[[]byte]{}))
 	fmt.Printf("[]byte(nil): %d\n", unsafe.Sizeof([]byte((nil))))
-	fmt.Printf("entry{}: %d\n", unsafe.Sizeof(entry{}))
+	fmt.Printf("entry{}: %d\n", unsafe.Sizeof(entry[[]byte]{}))
 	//assert.Fail(t, "foobar")
 }
 
@@ -131,7 +131,7 @@ func Test__bucketMask(t *testing.T) {
 
 	for _, tt := range ttable {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMap(tt.mapSize)
+			m := NewMap[[]byte](tt.mapSize)
 			bm := bucketMask(m.logSize)
 			assert.Equal(t, tt.wantMask, bm)
 		})
@@ -153,7 +153,7 @@ func Test__hashKey(t *testing.T) {
 
 	for _, tt := range ttable {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMap(tt.mapSize)
+			m := NewMap[[]byte](tt.mapSize)
 			_, bucket := m.hashKey(tt.name)
 
 			assert.Equal(t, tt.wantBucket, bucket)
@@ -162,7 +162,7 @@ func Test__hashKey(t *testing.T) {
 }
 
 func Test__Map_can_insert_and_retrieve_a_value_from_one_bucket(t *testing.T) {
-	m := NewMap(15)
+	m := NewMap[[]byte](15)
 
 	key := "foobar"
 	value := []byte("data")
@@ -174,7 +174,7 @@ func Test__Map_can_insert_and_retrieve_a_value_from_one_bucket(t *testing.T) {
 }
 
 func Test__Map_can_insert_and_retrieve_a_value(t *testing.T) {
-	m := NewMap(16)
+	m := NewMap[[]byte](16)
 
 	key := "foobar"
 	value := []byte("data")
@@ -187,7 +187,7 @@ func Test__Map_can_insert_and_retrieve_a_value(t *testing.T) {
 }
 
 func Test__Map_can_insert_two_values_in_same_bucket(t *testing.T) {
-	m := NewMap(16)
+	m := NewMap[[]byte](16)
 
 	m.Insert("foobar", []byte("data"))
 	m.Insert("bingo", []byte("data"))
@@ -195,7 +195,7 @@ func Test__Map_can_insert_two_values_in_same_bucket(t *testing.T) {
 
 func Test__Map_insert_and_retrieve_2_values(t *testing.T) {
 	size := 2
-	m := NewMap(size)
+	m := NewMap[[]byte](size)
 
 	insertEntries(m, size)
 	verifyEntries(t, m, size)
@@ -203,7 +203,7 @@ func Test__Map_insert_and_retrieve_2_values(t *testing.T) {
 
 func Test__Map_insert_and_retrieve_8_values(t *testing.T) {
 	size := 6
-	m := NewMap(size)
+	m := NewMap[[]byte](size)
 
 	insertEntries(m, size)
 	verifyEntries(t, m, size)
@@ -211,7 +211,7 @@ func Test__Map_insert_and_retrieve_8_values(t *testing.T) {
 
 func Test__Map_insert_and_retrieve_15_values(t *testing.T) {
 	size := 15
-	m := NewMap(size)
+	m := NewMap[[]byte](size)
 
 	insertEntries(m, size)
 	verifyEntries(t, m, size)
@@ -219,14 +219,14 @@ func Test__Map_insert_and_retrieve_15_values(t *testing.T) {
 
 func Test__Map_insert_and_retrieve_16_values(t *testing.T) {
 	size := 16
-	m := NewMap(size)
+	m := NewMap[[]byte](size)
 
 	insertEntries(m, size)
 	verifyEntries(t, m, size)
 }
 
 func Test__Map_can_insert_16_entries_in_two_groups(t *testing.T) {
-	m := NewMap(16)
+	m := NewMap[[]byte](16)
 	insertEntries(m, 16)
 
 	assert.Equal(t, uint64(16), m.usedSpace)
@@ -234,14 +234,14 @@ func Test__Map_can_insert_16_entries_in_two_groups(t *testing.T) {
 
 func Test__Map_can_insert_32_entries_in_two_groups(t *testing.T) {
 	size := uint64(32)
-	m := NewMap(int(size))
+	m := NewMap[[]byte](int(size))
 	insertEntries(m, int(size))
 
 	assert.Equal(t, size, m.usedSpace)
 }
 
 func Test__Map_insert_and_retrieve_on_big_map(t *testing.T) {
-	m := NewMap(64)
+	m := NewMap[[]byte](64)
 
 	m.Insert("42", []byte("42"))
 	val, ok := m.Get("42")
@@ -251,7 +251,7 @@ func Test__Map_insert_and_retrieve_on_big_map(t *testing.T) {
 
 func Test__Map_insert_and_retrieve_32_values(t *testing.T) {
 	entries := 32
-	m := NewMap(512)
+	m := NewMap[[]byte](512)
 
 	insertEntries(m, int(entries))
 
@@ -261,7 +261,7 @@ func Test__Map_insert_and_retrieve_32_values(t *testing.T) {
 
 func Test__Map_insert_many_values(t *testing.T) {
 	entries := 1 << 5
-	m := NewMap(entries)
+	m := NewMap[[]byte](entries)
 	insertEntries(m, entries)
 
 	assert.Equal(t, uint64(entries), m.usedSpace, "in non-hex: %d", m.usedSpace)
@@ -270,13 +270,13 @@ func Test__Map_insert_many_values(t *testing.T) {
 	// all is good.
 }
 
-func insertEntries(m *Map, size int) {
+func insertEntries(m *Map[[]byte], size int) {
 	for i := uint64(0); i < uint64(size); i++ {
 		m.Insert(strconv.Itoa(int(i)), []byte("data"))
 	}
 }
 
-func verifyEntries(t *testing.T, m *Map, size int) {
+func verifyEntries(t *testing.T, m *Map[[]byte], size int) {
 	for i := uint64(0); i < uint64(size); i++ {
 		val, ok := m.Get(strconv.Itoa(int(i)))
 		assert.True(t, ok)

@@ -15,26 +15,26 @@ const (
 )
 
 // this is 40 bytes.
-type entry struct {
+type entry[V any] struct {
 	key   string
-	value []byte
+	value V
 }
 
 // TODO Make bucket byte-aligned (currently it stands at 664 bytes.)
-type bucket struct {
+type bucket[V any] struct {
 	controls [_slotsPerGroup]byte
 	// keys     [_slotsPerGroup]string
 	// values   [_slotsPerGroup][]byte
-	entries [_slotsPerGroup]entry
+	entries [_slotsPerGroup]entry[V]
 
 	full bool
 	// To make a bucket page-aligned
 	filler [360]byte
 }
 
-type Map struct {
+type Map[V any] struct {
 	//// We divide these into keys and values for locality
-	buckets []bucket
+	buckets []bucket[V]
 	// These masks are for quickly locating the slot and group from a hash
 	logSize uint8 // log_2 of # of groups (can hold up to loadFactor * 2^B items)
 
@@ -46,15 +46,17 @@ type Map struct {
 	noMatch uint64
 }
 
-func NewMap(size int) *Map {
+// NewMap creates a new caymap initialized with the given size and given value
+// type.
+func NewMap[V any](size int) *Map[V] {
 	logSize := logSizeOfBuckets(size)
 
-	m := &Map{
+	m := &Map[V]{
 		logSize: logSize,
 
 		//		buckets: make([]bucket, powerOfTwoSize/_slotsPerGroup),
 		// The logSize of buckets is used to derive the number of buckets
-		buckets: make([]bucket, 1<<logSize),
+		buckets: make([]bucket[V], 1<<logSize),
 	}
 	// We need to mark all entries as empty
 	for gi := range m.buckets {
@@ -69,7 +71,7 @@ func NewMap(size int) *Map {
 	return m
 }
 
-func (m *Map) Insert(key string, value []byte) {
+func (m *Map[V]) Insert(key string, value V) {
 	hash, sGroup := m.hashKey(key)
 	// First, we iterate the groups to figure out whether the key is already in any of the groups
 	grpF, pos, _ := m.find(key)
@@ -116,7 +118,7 @@ func (m *Map) Insert(key string, value []byte) {
 
 // find returns the position of the key in the map. You need to pass in the bucket and mask of the
 // key, as returned from hashKey
-func (m *Map) find(key string) (group uintptr, slot int, value *[]byte) {
+func (m *Map[V]) find(key string) (group uintptr, slot int, value *V) {
 	// Manually inlining the hashKey function as the Go compiler won't
 	keyP := (*z.StringStruct)(unsafe.Pointer(&key))
 
@@ -186,7 +188,7 @@ func (m *Map) find(key string) (group uintptr, slot int, value *[]byte) {
 	return _notFound, 0, nil
 }
 
-func (m *Map) hashKey(key string) (hash, bucket uintptr) {
+func (m *Map[V]) hashKey(key string) (hash, bucket uintptr) {
 	keyP := (*z.StringStruct)(unsafe.Pointer(&key))
 
 	hash = z.Memhash(keyP.Str, 0, uintptr(keyP.Len))

@@ -7,27 +7,23 @@ import (
 	"github.com/jakobgt/cay/z"
 )
 
-// Get returns the entry with the given key and a bool if the key was found.
-func (m *Map) Get(key string) ([]byte, bool) {
-	grp, val := m.findGet(key)
-
-	if grp == _notFound {
-		return nil, false
-	}
-	return *val, true
-}
-
-const (
-	entrySize = unsafe.Sizeof(entry{})
-	keyOffset = unsafe.Offsetof(entry{}.key)
-)
-
 const (
 	PtrSize = 4 << (^uintptr(0) >> 63)
 )
 
-// findGet returns the position of the key in the map.
-func (m *Map) findGet(key string) (group uintptr, value *[]byte) {
+// Get returns the entry with the given key and a bool if the key was found.
+func (m *Map[V]) Get(key string) (V, bool) {
+	p, ok := m.findGet(key)
+	if !ok {
+		var noop V
+		return noop, false
+	}
+	return *(*V)(p), true
+}
+
+// findGet returns a pointer to value if present in the map and a boolean that represent if
+// the key was found
+func (m *Map[V]) findGet(key string) (*V, bool) {
 	// Manually inlining the hashKey function as the Go compiler won't
 	keyP := (*z.StringStruct)(unsafe.Pointer(&key))
 
@@ -93,13 +89,13 @@ func (m *Map) findGet(key string) (group uintptr, value *[]byte) {
 			// We force i to be less than 16 to avoid the index out of bound check below.
 			// This causes a ton of TLB misses.
 			if keyP.Str == ekeyP.Str {
-				return cGroup, &entry.value
+				return &entry.value, true
 			}
 
 			if z.Memequal(ekeyP.Str, keyP.Str, uintptr(keyP.Len)) {
 				// TODO, we need to ensure that i is less than 16 to avoid a out of bound check
 				//				fmt.Printf("keyP and ekeyP do not point to the same str: &keyP: %x and &ekeyP: %x\n", keyP.Str, ekeyP.Str)
-				return cGroup, &entry.value
+				return &entry.value, true
 			}
 			idx ^= idx & -idx
 			// if idx != 0 {
@@ -113,5 +109,5 @@ func (m *Map) findGet(key string) (group uintptr, value *[]byte) {
 		}
 	}
 	// We did not find the values
-	return _notFound, nil
+	return (*V)(nil), false
 }

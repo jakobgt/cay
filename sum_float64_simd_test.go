@@ -153,6 +153,7 @@ func Test__HighestBitMask_on_heap_allocated(t *testing.T) {
 }
 
 func Benchmark_CompareNMask(b *testing.B) {
+	b.Skip()
 	zeroBucket := [16]byte{}
 	fullBucket := [_slotsPerGroup]byte{
 		0xff, 0xff, 0xff, 0xff,
@@ -181,6 +182,7 @@ func Benchmark_CompareNMask(b *testing.B) {
 }
 
 func Benchmark___CompareNMask(b *testing.B) {
+	b.Skip()
 	zeroBucket := [16]byte{}
 	fullBucket := [_slotsPerGroup]byte{
 		0xff, 0xff, 0xff, 0xff,

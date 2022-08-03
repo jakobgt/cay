@@ -14,18 +14,22 @@ const (
 	_notFound      uintptr = 1 << 63
 )
 
-//
-//type entry struct {
-//	key   string
-//	value []byte
-//}
+// this is 40 bytes.
+type entry struct {
+	key   string
+	value []byte
+}
 
-// TODO Bucket on an entry? That way the
+// TODO Make bucket byte-aligned (currently it stands at 664 bytes.)
 type bucket struct {
 	controls [_slotsPerGroup]byte
-	keys     [_slotsPerGroup]string
-	full     bool
-	values   [_slotsPerGroup][]byte
+	// keys     [_slotsPerGroup]string
+	// values   [_slotsPerGroup][]byte
+	entries [_slotsPerGroup]entry
+
+	full bool
+	// To make a bucket page-aligned
+	filler [360]byte
 }
 
 type Map struct {
@@ -72,7 +76,7 @@ func (m *Map) Insert(key string, value []byte) {
 
 	// If we found the key in the map, then we return
 	if grpF != _notFound {
-		m.buckets[grpF].values[pos] = value
+		m.buckets[grpF].entries[pos].value = value
 		return
 	}
 
@@ -93,8 +97,8 @@ func (m *Map) Insert(key string, value []byte) {
 		// We want to fill the group from right to left to ease caching and memory prefetching
 		//absSlot := cGroup*16 + uint64(emptySlot)
 		grp.controls[emptySlot] = byte(hash >> 57)
-		grp.keys[emptySlot] = key
-		grp.values[emptySlot] = value
+		grp.entries[emptySlot].key = key
+		grp.entries[emptySlot].value = value
 
 		// Make sure to set the full bit.
 		// Count ones in the bitvector. If there is less than 2, then this bucket is now full.
@@ -109,20 +113,6 @@ func (m *Map) Insert(key string, value []byte) {
 	panic(fmt.Sprintf("Not enough space in the hashmap for key %s and mask %d (calculated bucket: %d). Size is %d and used space is %d. Tried %d buckets\n",
 		key, bMask, sGroup, len(m.buckets), m.usedSpace, sGroup))
 }
-
-func (m *Map) Get(key string) ([]byte, bool) {
-	grp, _, val := m.find(key)
-
-	if grp == _notFound {
-		return nil, false
-	}
-
-	return *val, true
-}
-
-const (
-	PtrSize = 4 << (^uintptr(0) >> 63)
-)
 
 // find returns the position of the key in the map. You need to pass in the bucket and mask of the
 // key, as returned from hashKey
@@ -148,7 +138,9 @@ func (m *Map) find(key string) (group uintptr, slot int, value *[]byte) {
 	for cGroup := sGroup; cGroup < uintptr(len(m.buckets)); cGroup = (cGroup + 1) & bMask {
 		//	for cGroup := sGroup; cGroup < uintptr(len(m.buckets)); cGroup = (cGroup + 1) & bMask {
 		grp := &m.buckets[cGroup]
-		grpCtrlPointer := unsafe.Pointer(&grp.controls)
+		grpCtrlPointer := noescape(unsafe.Pointer(&grp.controls))
+		// It might seem that __CompareNMask takes a long time, but that is because it hits a
+		// TLB miss.
 		idx := __CompareNMask(grpCtrlPointer, unsafe.Pointer(hash>>57))
 		// IDX has 1 in its bit representation for every match, and so we iterate each of these
 		// positions.
@@ -156,26 +148,33 @@ func (m *Map) find(key string) (group uintptr, slot int, value *[]byte) {
 		// (5x over the naive for loop)
 		// More info in https://lemire.me/blog/2018/02/21/iterating-over-set-bits-quickly/
 		for idx != 0 {
-			t := idx & -idx
 			i := bits.TrailingZeros16(idx)
-			idx ^= t
 			// With the mask of m and idx overlapping there is a potential candidate at this
 			// pos that could be the key
 			//			absPos := cGroup*16 + uint64(i)
-			// This is slow? Key comparison? And the generated instructions have a JMPQ in it,
-			// so it might the compuler
-			// It might seem that the bounds on this index lookup is what is causing it
-			// to be slow...
-			ekeyP := (*z.StringStruct)(unsafe.Pointer(&grp.keys[i]))
+			// These two lines are equal, I'm just testing what the extra index bound chek means in
+			// terms of performance.
+			ekeyP := (*z.StringStruct)(unsafe.Pointer(&grp.entries[i].key))
+			//ekeyP := (*z.StringStruct)(add(noescape(unsafe.Pointer(&grp.keys)), uintptr(i)*stringSize))
 
+			// This comparison might seem slow, but it is because the ekeyP.Len hits a TLB miss ~16% of the
+			// time. Unsure why.
+			// Furthermore this causes 77% of the total cache misses (in just this function - 1818 samples, whereas the
+			// the __CompareNMask accounts for 1752 cache misses -excluding TLB misses. )
 			if keyP.Len != ekeyP.Len {
+				t := idx & -idx
+				idx ^= t
 				continue
+
 			}
 			// We force i to be less than 16 to avoid the index out of bound check below.
+			// This causes a ton of TLB misses.
 			if keyP == ekeyP || keyP.Str == ekeyP.Str || z.Memequal(ekeyP.Str, keyP.Str, uintptr(keyP.Len)) {
 				// TODO, we need to ensure that i is less than 16 to avoid a out of bound check
-				return cGroup, i, &grp.values[i]
+				return cGroup, i, &grp.entries[i].value
 			}
+			t := idx & -idx
+			idx ^= t
 		}
 
 		// Check whether any slot in the bucket is empty. If so we've found our bucket
@@ -227,4 +226,10 @@ func bucketShift(b uint8) uintptr {
 // bucketMask returns 1<<b - 1, optimized for code generation.
 func bucketMask(b uint8) uintptr {
 	return bucketShift(b) - 1
+}
+
+// Should be a built-in for unsafe.Pointer?
+//go:nosplit
+func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
+	return unsafe.Pointer(uintptr(p) + x)
 }

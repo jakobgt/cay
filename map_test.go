@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/jakobgt/cay/z"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,10 +21,31 @@ func Test__BMap(t *testing.T) {
 }
 
 func Test__Map(t *testing.T) {
-	m := NewMap(16)
+	m := NewMap(128)
 
 	_, ok := m.Get("foobar")
 	assert.False(t, ok)
+}
+
+func Test__FirstBucketIsPageAligned(t *testing.T) {
+	m := NewMap(128)
+
+	_, ok := m.Get("foobar")
+	assert.False(t, ok)
+
+	fAddr := uintptr(unsafe.Pointer(&m.buckets[0]))
+	assert.Equal(t, uintptr(0), fAddr%4096, "Bucket[0] with address: %x is not page-aligned", fAddr)
+}
+
+func Test__FirstKeyEntryIsSameAddressAsKeys(t *testing.T) {
+	m := NewMap(128)
+
+	_, ok := m.Get("foobar")
+	assert.False(t, ok)
+
+	ksAddr := uintptr(unsafe.Pointer(&m.buckets[0].entries))
+	k0Addr := uintptr(unsafe.Pointer(&m.buckets[0].entries[0].key))
+	assert.Equal(t, ksAddr, k0Addr)
 }
 
 type aStruct struct {
@@ -42,7 +64,8 @@ func Test__SizeOfByteSlice(t *testing.T) {
 	fmt.Printf("aStruct: %d\n", unsafe.Sizeof(aStruct{}))
 	fmt.Printf("bucket: %d\n", unsafe.Sizeof(bucket{}))
 	fmt.Printf("[]byte(nil): %d\n", unsafe.Sizeof([]byte((nil))))
-	//	assert.Fail(t, "foobar")
+	fmt.Printf("entry{}: %d\n", unsafe.Sizeof(entry{}))
+	//assert.Fail(t, "foobar")
 }
 
 func Test__lowestPowerOfTwo(t *testing.T) {
@@ -155,7 +178,8 @@ func Test__Map_can_insert_and_retrieve_a_value(t *testing.T) {
 
 	key := "foobar"
 	value := []byte("data")
-
+	pKey := (*z.StringStruct)(unsafe.Pointer(&key))
+	fmt.Printf("&pKey: %x", pKey.Str)
 	m.Insert(key, value)
 	val, ok := m.Get(key)
 	require.True(t, ok)

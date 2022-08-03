@@ -9,6 +9,7 @@ import (
 func __CompareNMask(buf, mask unsafe.Pointer) (ret uint16)
 
 //go:noescape
+//go:nosplit
 func __HighestBitMask(buf, unused, result unsafe.Pointer)
 
 //go:nosplit
@@ -19,6 +20,8 @@ func CompareNMask(ctrlGroup [_slotsPerGroup]byte, mask byte) uint16 {
 //go:nosplit
 func HighestBitMask(ctrlGroup [_slotsPerGroup]byte) uint16 {
 	var (
+		// We don't want ctrlGroup to escape to the heap, but if it doesn't then the code panics.
+		// Probably something with alignment....
 		p1     = unsafe.Pointer(&ctrlGroup)
 		unused = unsafe.Pointer(uintptr(0))
 		res    uint16

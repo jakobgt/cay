@@ -12,6 +12,112 @@ to :
 - Register-based function calls
 - No function call.
 
+So far no conclusions on these functions calls, except in my dev environment the perf numbers looks reasonable:
+```
+$ go test -run=^\$ -cpu 1 -count 1 -bench 'function_call' -cpuprofile cpu.profile                                                             10:57 12/08
+goos: linux
+goarch: amd64
+pkg: github.com/jakobgt/cay
+cpu: AMD EPYC 7B13
+Benchmark_function_call_tlb_miss_rate/no_function_call         	52123150	        23.07 ns/op
+Benchmark_function_call_tlb_miss_rate/register-based_function_call         	40125406	        30.02 ns/op
+Benchmark_function_call_tlb_miss_rate/stack-based_ASM_function_call        	29837817	        41.30 ns/op
+```
+
+but on my Linux env (a laptop), the no function call is completely off (twice as slow as register-based one):
+
+```
+$ ./cay.test  -test.run=^\$ -test.cpu 1 -test.count 1 -test.bench 'function_call'
+goos: linux
+goarch: amd64
+pkg: github.com/jakobgt/cay
+cpu: Intel(R) Core(TM) i7-8665U CPU @ 1.90GHz
+Benchmark_function_call_tlb_miss_rate/no_function_call         	35837146	       115.0 ns/op
+Benchmark_function_call_tlb_miss_rate/register-based_function_call         	34069237	        52.23 ns/op
+Benchmark_function_call_tlb_miss_rate/stack-based_ASM_function_call        	32606010	        47.48 ns/op
+PASS
+```
+
+I'm unsure why that is.
+
+
+#### Caymap and TLB misses
+Further diving into the TLB misses for 1M case, we do see that after the `__CompareNMask` call and it access the key of an entry in the bucket 31% of cases have a TLB miss:
+```
+Sorted summary for file /home/cinnamon/jakob/cay.test
+----------------------------------------------
+
+   61.51 map_get.go:49 (# Is `ctrl := bucket.controls`, which makes sense)
+   31.95 map_get.go:69 (# Is `ctrl := bucket.controls`, thus access the key of the )
+    1.39 map_get.go:91
+    1.32 map_get.go:68
+    1.27 map_get.go:56
+ Percent |      Source code & Disassembly of cay.test for dTLB-load-misses (1833 samples, percent: local period)
+----------------------------------------------------------------------------------------------------------------
+         :            Disassembly of section .text:
+         :
+         :            000000000059b920 <github.com/jakobgt/cay.(*Map[go.shape.[]uint8_0]).findGet>:
+         :            github.com/jakobgt/cay.(*Map[go.shape.[]uint8_0]).findGet():
+```
+
+Looking into the builtin map access, we only see one place, where the TLB misses are:
+
+```
+Sorted summary for file /home/cinnamon/jakob/cay.test
+----------------------------------------------
+
+   95.42 map_faststr.go:192
+    0.78 map_faststr.go:195
+ Percent |      Source code & Disassembly of cay.test for dTLB-load-misses (4901 samples, percent: local period)
+----------------------------------------------------------------------------------------------------------------
+         :            Disassembly of section .text:
+         :
+         :            0000000000413ce0 <runtime.mapaccess2_faststr>:
+         :            runtime.mapaccess2_faststr():
+
+```
+
+What is interesting is if I just run perf and record the TLB load misses, there's a factor 10 in favor of caymap? So maybe it is something else than TLB:
+
+```
+cinnamon@cinnamon-testpod:~/jakob$ sudo perf stat -e dTLB-load-misses -g ./cay.test  -test.run=^\$ -test.cpu 1 -test.count 1 -test.bench 'read_id/1m/built'
+goos: linux
+goarch: amd64
+pkg: github.com/jakobgt/cay
+cpu: Intel(R) Core(TM) i7-8665U CPU @ 1.90GHz
+Benchmark_read_identical_string_keys/1m/builtin 	14916814	        89.78 ns/op
+PASS
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/built':
+
+        16,202,946      dTLB-load-misses  #Builtin has 16M tlb-misses
+
+       3.195433605 seconds time elapsed
+
+       2.721868000 seconds user
+       0.545967000 seconds sys
+
+
+cinnamon@cinnamon-testpod:~/jakob$ sudo perf stat -e dTLB-load-misses -g ./cay.test  -test.run=^\$ -test.cpu 1 -test.count 1 -test.bench 'read_id/1m/cay'
+goos: linux
+goarch: amd64
+pkg: github.com/jakobgt/cay
+cpu: Intel(R) Core(TM) i7-8665U CPU @ 1.90GHz
+Benchmark_read_identical_string_keys/1m/caymap  	14394189	        95.27 ns/op
+PASS
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/cay':
+
+         1,236,577      dTLB-load-misses   #caymap has 1.2M tlb-misses
+
+       3.541897468 seconds time elapsed
+
+       3.074113000 seconds user
+       0.529052000 seconds sys
+```
+
+
+
 ## 2022-08-03: More deep-diving on the TLB effect of the __CompareNMask function call
 
 TODO: Check up on

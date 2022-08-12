@@ -55,6 +55,11 @@ type pageSizedEntry struct {
 	data [_pageSize]byte
 }
 
+//go:noinline
+func addBytes(a, b byte) byte {
+	return a + b
+}
+
 func Benchmark_function_call_tlb_miss_rate(b *testing.B) {
 	sliceSize := 1 << 20
 	sliceMask := sliceSize - 1
@@ -84,6 +89,35 @@ func Benchmark_function_call_tlb_miss_rate(b *testing.B) {
 			k := keys[i&sliceMask]
 			d := &dataSlice[k]
 			com := d.data[0] + d.data[1024]
+			// We simulate a fetch
+			com += d.data[128] + d.data[2049]
+			sum += int(com)
+		}
+		runtime.KeepAlive(sum)
+	})
+
+	b.Run("register-based function call", func(b *testing.B) {
+		sum := 0
+		for i := 0; i < b.N; i++ {
+			k := keys[i&sliceMask]
+			d := &dataSlice[k]
+			com := addBytes(d.data[0], d.data[1024])
+			// We simulate a fetch
+			com += d.data[128] + d.data[2049]
+			sum += int(com)
+		}
+		runtime.KeepAlive(sum)
+	})
+
+	b.Run("stack-based ASM function call", func(b *testing.B) {
+		sum := 0
+		for i := 0; i < b.N; i++ {
+			k := keys[i&sliceMask]
+			d := &dataSlice[k]
+			com := __addBytesAsm(d.data[0], d.data[1024])
+			// We simulate a fetch
+			com += d.data[128] + d.data[2049]
+
 			sum += int(com)
 		}
 		runtime.KeepAlive(sum)

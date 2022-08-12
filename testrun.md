@@ -1,6 +1,16 @@
 # Observation log
 
-As this is my first foray into optimizing memory accessed and what not in Go, I try to document my findings here (also to flush my mental cach).
+As this is my first foray into optimizing memory accessed and what not in Go, I try to document my findings here (also to flush my mental cache).
+
+## 2022-08-12: Investigating TLB-misses due to function calls
+
+The `__CompareNMask` function call is using the old stack-based convention, where arguments are pushed and pulled
+from the stack. Given these memory stores and loads, we might hit the TLB, so I want to compare the TLB-miss rate due
+to :
+
+- Stack-based function calls
+- Register-based function calls
+- No function call.
 
 ## 2022-08-03: More deep-diving on the TLB effect of the __CompareNMask function call
 
@@ -10,7 +20,7 @@ TODO: Check up on
 
 Looked into
 - TLB misses around the __CompareNMask call (more verification there)
-- Checked whether the Go tracing could be helpful (it did)
+- Checked whether the Go tracing could be helpful (it did) - I made the test cases more sane.
 
 
 ### TLB misses

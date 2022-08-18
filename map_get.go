@@ -54,6 +54,7 @@ func (m *Map[V]) findGet(key string) (*V, bool) {
 		bEntries := &bucket.entries
 		//runtime.KeepAlive(bEntries)
 		idx := __CompareNMask(grpCtrlPointer, unsafe.Pointer(hash>>57))
+		//idx := uint16(ctrl[0])&uint16(hash>>57&3) + (1)
 		//bEntries = &bucket.entries
 
 		// IDX has 1 in its bit representation for every match, and so we iterate each of these
@@ -71,7 +72,7 @@ func (m *Map[V]) findGet(key string) (*V, bool) {
 			// With the mask of m and idx overlapping there is a potential candidate at this
 			// pos that could be the key
 			//			absPos := cGroup*16 + uint64(i)
-			// These two lines are equal, I'm just testing what the extra index bound chek means in
+			// These two lines are equal, I'm just testing what the extra index bound check means in
 			// terms of performance.
 			ekeyP := (*z.StringStruct)(unsafe.Pointer(&bKey))
 			//ekeyP := (*z.StringStruct)(add(unsafe.Pointer(&bucket.entries), uintptr(i)*entrySize+keyOffset))
@@ -80,11 +81,13 @@ func (m *Map[V]) findGet(key string) (*V, bool) {
 			// time. Unsure why (the page that ekeyP is part of should have been loaded with __CompareNMask).
 			// Furthermore this causes 77% of the total cache misses (in just this function - 1818 samples, whereas the
 			// the __CompareNMask accounts for 1752 cache misses -excluding TLB misses. )
-			if keyP.Len != ekeyP.Len {
+			if keyP.Len != ekeyP.Len { // && idx != 0
 				idx ^= idx & -idx
 				continue
 
 			}
+			// // We short-circuit the comparison here:
+			// return &entry.value, true
 			// We force i to be less than 16 to avoid the index out of bound check below.
 			// This causes a ton of TLB misses.
 			if keyP.Str == ekeyP.Str {

@@ -21,6 +21,8 @@ type entry[V any] struct {
 }
 
 // TODO Make bucket byte-aligned (currently it stands at 664 bytes.)
+// In the builtin map they don't pad and goes to great length to avoid it
+// Would that be an option?
 type bucket[V any] struct {
 	controls [_slotsPerGroup]byte
 	// keys     [_slotsPerGroup]string

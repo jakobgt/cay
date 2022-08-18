@@ -2,6 +2,102 @@
 
 As this is my first foray into optimizing memory accessed and what not in Go, I try to document my findings here (also to flush my mental cache).
 
+
+## 2022-08-18 Comparing TLB and cache misses between builtin and cay
+
+Honestly, it does not seem to be related to TLB misses, as cay has a much lower rate.
+
+On the other hand mem-stores is a lot higher than builtin. For 1M, cay is at 2Bn mem-stores, whereas builtin is at 1.6M.
+Maybe I should try to use [toplev](https://github.com/andikleen/pmu-tools), that can visualize what the CPU is doing.
+
+Using perf on a modified version of cay, where we don't do a `__CompareNMask` function call, but instead have a few
+bit operations "`idx := uint16(ctrl[0])&uint16(hash>>57&3) + (1)`", emulating that we fetch the control bytes and do
+some byte operations on them. It does seem that changing the `(1)` factor has an impact on the latency, which could indicate that some we hit some boundary in the cache line somewhere.
+
+Before (having `__CompareNMask`):
+```
+$ for TV in 8 1k 32k 512k 1m; do sudo perf stat -e dTLB-load-misses,cache-misses -g ./cay.test  -test.run=^\$ -test.cpu 1 -test.count 1 -test.bench "read_id/$TV/cay"; done
+cpu: Intel(R) Core(TM) i7-8665U CPU @ 1.90GHz
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/cay':
+           131,117      dTLB-load-misses
+        14,852,562      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/cay':
+           121,029      dTLB-load-misses
+        14,873,464      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/cay':
+           113,144      dTLB-load-misses
+        90,630,164      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/cay':
+           704,105      dTLB-load-misses
+       276,259,860      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/cay':
+         1,324,025      dTLB-load-misses
+       316,184,011      cache-misses
+```
+
+After (removing `__CompareNMask`):
+
+```
+$ for TV in 8 1k 32k 512k 1m; do sudo perf stat -e dTLB-load-misses,cache-misses -g ./cay.test  -test.run=^\$ -test.cpu 1 -test.count 1 -test.bench "read_id/$TV/cay"; done
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/cay':
+           116,947      dTLB-load-misses
+        14,151,668      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/cay':
+           124,258      dTLB-load-misses
+        15,277,182      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/cay':
+           120,314      dTLB-load-misses
+        54,505,594      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/cay':
+           738,956      dTLB-load-misses
+       258,818,526      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/cay':
+         1,470,155      dTLB-load-misses
+       465,317,721      cache-misses
+```
+
+
+As a baseline these are the results from builtin:
+
+```
+$ for TV in 8 1k 32k 512k 1m; do sudo perf stat -e dTLB-load-misses,cache-misses -g ./cay.test  -test.run=^\$ -test.cpu 1 -test.count 1 -test.bench "read_id/$TV/built"; done
+...
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/built':
+           118,019      dTLB-load-misses
+        14,633,452      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/built':
+           125,581      dTLB-load-misses
+        14,527,774      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/built':
+           133,197      dTLB-load-misses
+        53,978,241      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/built':
+        15,324,337      dTLB-load-misses
+       311,375,476      cache-misses
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/built':
+        16,594,415      dTLB-load-misses
+       344,985,919      cache-misses
+```
+
+For the low number, cay has higher tlb misses and cache misses, and for the 1M size, cay has higher cache-miss.
+
+
+
+
+
 ## 2022-08-12: Investigating TLB-misses due to function calls
 
 The `__CompareNMask` function call is using the old stack-based convention, where arguments are pushed and pulled

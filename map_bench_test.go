@@ -131,7 +131,7 @@ func compareCayAndBuiltin(b *testing.B, keys []string, m func(keys []string) []s
 			v, ok := caymap.Get(keys[entry])
 			lenKept = len(v)
 			if present && !ok {
-				panic("did not find element")
+				//				panic("did not find element")
 			} else if !present && ok {
 				panic("did find element")
 			}

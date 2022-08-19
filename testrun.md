@@ -2,6 +2,351 @@
 
 As this is my first foray into optimizing memory accessed and what not in Go, I try to document my findings here (also to flush my mental cache).
 
+## 2022-08-19 Investigating the memory
+It seems that the problem is with memory and the memory caches. Using perf and the perf-test.sh tool, cay has a better TLB rate (TLB metric group)
+and higher instruction per cycle count (default perf summary), but worse memory cache usage.
+
+Thus, I need to look into the memory locality and whether the cay map is way too sparse. Maybe look into the fillrate?
+
+### Summary data:
+(No metrics or metric group given to perf. )
+Check the insn per cycle (instructions per cycle), the higher the better. Except for the 8 entry case, it is higher for cay than the builtin map.
+Further branch-misses is significantly lower (upwards of 10x) for Cay in all cases (except 8).
+```
+$ ./perf-test.sh
+# Benchmark size 8
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/cay':
+
+          2,783.53 msec task-clock                #    1.026 CPUs utilized
+             1,584      context-switches          #    0.569 K/sec
+               302      cpu-migrations            #    0.108 K/sec
+             8,032      page-faults               #    0.003 M/sec
+     8,830,482,141      cycles                    #    3.172 GHz
+    19,640,426,332      instructions              #    2.22  insn per cycle
+     3,136,398,887      branches                  # 1126.770 M/sec
+        10,685,521      branch-misses             #    0.34% of all branches
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/built':
+
+          2,530.04 msec task-clock                #    1.031 CPUs utilized
+             1,518      context-switches          #    0.600 K/sec
+               271      cpu-migrations            #    0.107 K/sec
+             7,503      page-faults               #    0.003 M/sec
+     8,041,054,439      cycles                    #    3.178 GHz
+    23,121,725,391      instructions              #    2.88  insn per cycle
+     4,859,536,122      branches                  # 1920.733 M/sec
+         2,037,432      branch-misses             #    0.04% of all branches
+
+# Benchmark size 1k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/cay':
+
+          2,688.34 msec task-clock                #    1.033 CPUs utilized
+             1,513      context-switches          #    0.563 K/sec
+               292      cpu-migrations            #    0.109 K/sec
+             8,183      page-faults               #    0.003 M/sec
+     8,549,802,679      cycles                    #    3.180 GHz
+    19,139,506,643      instructions              #    2.24  insn per cycle
+     3,029,410,736      branches                  # 1126.869 M/sec
+         4,031,192      branch-misses             #    0.13% of all branches
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/built':
+
+          2,885.53 msec task-clock                #    1.029 CPUs utilized
+             1,942      context-switches          #    0.673 K/sec
+               272      cpu-migrations            #    0.094 K/sec
+             7,385      page-faults               #    0.003 M/sec
+     9,178,403,154      cycles                    #    3.181 GHz
+    16,996,576,330      instructions              #    1.85  insn per cycle
+     2,965,568,826      branches                  # 1027.738 M/sec
+        33,831,083      branch-misses             #    1.14% of all branches
+
+# Benchmark size 32k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/cay':
+
+          2,727.82 msec task-clock                #    1.033 CPUs utilized
+             1,463      context-switches          #    0.536 K/sec
+               177      cpu-migrations            #    0.065 K/sec
+             8,134      page-faults               #    0.003 M/sec
+     8,726,841,458      cycles                    #    3.199 GHz
+    16,212,499,857      instructions              #    1.86  insn per cycle
+     2,561,185,225      branches                  #  938.913 M/sec
+         3,515,472      branch-misses             #    0.14% of all branches
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/built':
+
+          2,680.82 msec task-clock                #    1.033 CPUs utilized
+             1,656      context-switches          #    0.618 K/sec
+               193      cpu-migrations            #    0.072 K/sec
+             8,738      page-faults               #    0.003 M/sec
+     8,522,265,149      cycles                    #    3.179 GHz
+    14,409,612,866      instructions              #    1.69  insn per cycle
+     2,459,666,444      branches                  #  917.506 M/sec
+        31,985,482      branch-misses             #    1.30% of all branches
+
+# Benchmark size 512k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/cay':
+
+          3,502.46 msec task-clock                #    1.024 CPUs utilized
+             1,844      context-switches          #    0.526 K/sec
+               342      cpu-migrations            #    0.098 K/sec
+            19,913      page-faults               #    0.006 M/sec
+    10,549,826,964      cycles                    #    3.012 GHz
+    15,326,648,502      instructions              #    1.45  insn per cycle
+     2,645,720,701      branches                  #  755.388 M/sec
+         6,797,453      branch-misses             #    0.26% of all branches
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/built':
+
+          3,206.88 msec task-clock                #    1.026 CPUs utilized
+             1,511      context-switches          #    0.471 K/sec
+               249      cpu-migrations            #    0.078 K/sec
+            20,389      page-faults               #    0.006 M/sec
+    10,039,149,266      cycles                    #    3.131 GHz
+    14,010,827,099      instructions              #    1.40  insn per cycle
+     2,426,420,176      branches                  #  756.630 M/sec
+        19,769,838      branch-misses             #    0.81% of all branches
+
+# Benchmark size 1m
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/cay':
+
+          4,092.63 msec task-clock                #    1.018 CPUs utilized
+             1,839      context-switches          #    0.449 K/sec
+               367      cpu-migrations            #    0.090 K/sec
+            31,515      page-faults               #    0.008 M/sec
+    12,407,871,126      cycles                    #    3.032 GHz
+    18,415,418,260      instructions              #    1.48  insn per cycle
+     3,352,476,604      branches                  #  819.151 M/sec
+        10,492,666      branch-misses             #    0.31% of all branches
+
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/built':
+
+          3,665.66 msec task-clock                #    1.022 CPUs utilized
+             1,901      context-switches          #    0.519 K/sec
+               380      cpu-migrations            #    0.104 K/sec
+            30,913      page-faults               #    0.008 M/sec
+    11,654,925,508      cycles                    #    3.179 GHz
+    15,773,511,313      instructions              #    1.35  insn per cycle
+     2,810,254,603      branches                  #  766.643 M/sec
+        21,821,482      branch-misses             #    0.78% of all branches
+```
+
+### TLB data
+Here we run with the TLB perf metric group. Looking below the `dtlb_load_misses.walk_pending` metrics is lower for cay
+and especially for the big sized maps. E.g., for the 1M case cay is at `88,098,107`, whereas the builtin is at `1,009,407,450`.
+Thus, it does not seem that the TLB is the culprit. The iTLB does not look very different and neither does dtlb for store_misses.
+
+```
+$ ./perf-test.sh TLB
+# Benchmark size 8
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/cay':
+        24,531,832      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         2,710,554      dtlb_store_misses.walk_pending
+     8,672,852,677      cycles
+         8,993,497      dtlb_load_misses.walk_pending
+                 1      ept.walk_pending
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/built':
+        24,878,419      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         2,825,332      dtlb_store_misses.walk_pending
+    11,432,187,042      cycles
+        10,390,090      dtlb_load_misses.walk_pending
+                 1      ept.walk_pending
+
+# Benchmark size 1k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/cay':
+        23,910,628      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         2,647,062      dtlb_store_misses.walk_pending
+     8,806,311,421      cycles
+         8,881,615      dtlb_load_misses.walk_pending
+                 2      ept.walk_pending
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/built':
+        23,542,237      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         2,460,400      dtlb_store_misses.walk_pending
+     8,636,039,813      cycles
+         9,985,277      dtlb_load_misses.walk_pending
+                 0      ept.walk_pending
+
+# Benchmark size 32k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/cay':
+        24,763,302      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         2,866,027      dtlb_store_misses.walk_pending
+    11,041,198,654      cycles
+        10,393,644      dtlb_load_misses.walk_pending
+                 2      ept.walk_pending
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/built':
+        24,418,387      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         3,238,301      dtlb_store_misses.walk_pending
+     8,609,729,426      cycles
+        18,096,090      dtlb_load_misses.walk_pending
+                 0      ept.walk_pending
+
+# Benchmark size 512k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/cay':
+        25,283,132      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         5,555,387      dtlb_store_misses.walk_pending
+    10,472,566,848      cycles
+        45,438,830      dtlb_load_misses.walk_pending
+                 0      ept.walk_pending
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/built':
+        26,503,918      itlb_misses.walk_pending  #     0.04 Page_Walks_Utilization
+         6,113,194      dtlb_store_misses.walk_pending
+    10,058,469,569      cycles
+       830,822,775      dtlb_load_misses.walk_pending
+                 1      ept.walk_pending
+
+# Benchmark size 1m
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/cay':
+        26,309,652      itlb_misses.walk_pending  #     0.00 Page_Walks_Utilization
+         9,421,192      dtlb_store_misses.walk_pending
+    12,705,813,840      cycles
+        88,098,107      dtlb_load_misses.walk_pending
+                 1      ept.walk_pending
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/built':
+        26,283,712      itlb_misses.walk_pending  #     0.05 Page_Walks_Utilization
+        11,332,328      dtlb_store_misses.walk_pending
+    11,453,552,268      cycles
+     1,009,407,450      dtlb_load_misses.walk_pending
+                 2      ept.walk_pending
+```
+### Cache Misses
+The cache misses for cay looks worse than builtin and that might be the reason for the latency differences. Check
+out the L*MPKI values, which means (taken from perf list)
+- L1MPKI: [L1 cache true misses per kilo instruction for retired demand loads]
+- L2MPKI: [L2 cache true misses per kilo instruction for retired demand loads]
+- L3MPKI: [L3 cache true misses per kilo instruction for retired demand loads]
+- L2HPKI_All: [L2 cache hits per kilo instruction for all request types (including speculative)]
+- L2MPKI_All: [L2 cache misses per kilo instruction for all request types (including speculative)]
+
+For all five, cay is worse. For L2MPKI_All, cay is ~10% worse, and for the 1m case:
+- L1MPKI is 44% higher/worse for cay
+- L2MPKI is 50% higher/worse for cay
+- L3MPKI is 13% higher/worse for cay.
+
+```
+$ ./perf-test.sh Cache_Misses
+# Benchmark size 8
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/cay':
+    20,985,177,035      inst_retired.any          #     0.98 L2MPKI_All
+                                                  #     0.88 L2HPKI_All               (53.94%)
+        20,592,361      l2_rqsts.miss                                                 (54.28%)
+        39,163,824      l2_rqsts.references                                           (54.95%)
+    21,007,535,636      inst_retired.any          #     0.20 L1MPKI                   (55.59%)
+         4,234,160      mem_load_retired.l1_miss                                      (56.61%)
+    20,820,691,960      inst_retired.any          #     0.12 L2MPKI                   (57.11%)
+         2,412,020      mem_load_retired.l2_miss                                      (56.71%)
+    20,812,248,529      inst_retired.any          #     0.09 L3MPKI                   (55.86%)
+         1,899,423      mem_load_retired.l3_miss                                      (54.95%)
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/8/built':
+    23,164,212,366      inst_retired.any          #     0.84 L2MPKI_All
+                                                  #     0.78 L2HPKI_All               (54.26%)
+        19,550,786      l2_rqsts.miss                                                 (54.75%)
+        37,516,125      l2_rqsts.references                                           (55.41%)
+    23,060,758,516      inst_retired.any          #     0.21 L1MPKI                   (55.96%)
+         4,875,197      mem_load_retired.l1_miss                                      (56.63%)
+    23,011,803,612      inst_retired.any          #     0.11 L2MPKI                   (56.86%)
+         2,507,324      mem_load_retired.l2_miss                                      (56.19%)
+    23,161,190,056      inst_retired.any          #     0.08 L3MPKI                   (55.32%)
+         1,864,263      mem_load_retired.l3_miss                                      (54.61%)
+
+# Benchmark size 1k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/cay':
+    19,559,433,538      inst_retired.any          #     2.13 L2MPKI_All
+                                                  #    16.68 L2HPKI_All               (55.08%)
+        41,616,379      l2_rqsts.miss                                                 (55.48%)
+       367,807,837      l2_rqsts.references                                           (55.76%)
+    19,551,157,782      inst_retired.any          #     5.32 L1MPKI                   (56.02%)
+       103,936,345      mem_load_retired.l1_miss                                      (56.31%)
+    19,713,489,843      inst_retired.any          #     0.22 L2MPKI                   (55.96%)
+         4,267,553      mem_load_retired.l2_miss                                      (55.53%)
+    19,667,423,864      inst_retired.any          #     0.09 L3MPKI                   (55.13%)
+         1,836,495      mem_load_retired.l3_miss                                      (54.73%)
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1k/built':
+    16,875,829,573      inst_retired.any          #     2.06 L2MPKI_All
+                                                  #    19.84 L2HPKI_All               (54.59%)
+        34,758,222      l2_rqsts.miss                                                 (55.46%)
+       369,643,159      l2_rqsts.references                                           (55.93%)
+    16,834,950,967      inst_retired.any          #     4.49 L1MPKI                   (56.15%)
+        75,571,486      mem_load_retired.l1_miss                                      (56.36%)
+    16,834,082,172      inst_retired.any          #     0.23 L2MPKI                   (56.40%)
+         3,898,075      mem_load_retired.l2_miss                                      (55.46%)
+    16,898,834,396      inst_retired.any          #     0.11 L3MPKI                   (54.92%)
+         1,830,326      mem_load_retired.l3_miss                                      (54.73%)
+
+# Benchmark size 32k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/cay':
+    15,723,857,870      inst_retired.any          #    22.51 L2MPKI_All
+                                                  #     5.88 L2HPKI_All               (54.17%)
+       353,966,152      l2_rqsts.miss                                                 (54.50%)
+       446,495,417      l2_rqsts.references                                           (55.16%)
+    15,768,811,226      inst_retired.any          #     6.05 L1MPKI                   (55.80%)
+        95,393,069      mem_load_retired.l1_miss                                      (56.42%)
+    15,807,752,488      inst_retired.any          #     4.41 L2MPKI                   (57.01%)
+        69,643,967      mem_load_retired.l2_miss                                      (56.40%)
+    15,790,548,309      inst_retired.any          #     0.25 L3MPKI                   (55.68%)
+         3,940,655      mem_load_retired.l3_miss                                      (54.87%)
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/32k/built':
+    14,367,825,777      inst_retired.any          #    23.20 L2MPKI_All
+                                                  #     5.44 L2HPKI_All               (54.97%)
+       333,336,155      l2_rqsts.miss                                                 (55.40%)
+       411,510,326      l2_rqsts.references                                           (55.96%)
+    14,397,381,463      inst_retired.any          #     5.36 L1MPKI                   (56.18%)
+        77,111,961      mem_load_retired.l1_miss                                      (56.47%)
+    14,473,547,929      inst_retired.any          #     4.15 L2MPKI                   (56.04%)
+        60,061,565      mem_load_retired.l2_miss                                      (55.48%)
+    14,415,442,764      inst_retired.any          #     0.19 L3MPKI                   (54.86%)
+         2,790,478      mem_load_retired.l3_miss                                      (54.64%)
+
+# Benchmark size 512k
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/cay':
+    15,631,316,763      inst_retired.any          #    16.93 L2MPKI_All
+                                                  #     5.14 L2HPKI_All               (55.23%)
+       264,593,214      l2_rqsts.miss                                                 (55.83%)
+       344,995,786      l2_rqsts.references                                           (56.15%)
+    15,654,062,627      inst_retired.any          #     6.02 L1MPKI                   (56.29%)
+        94,255,979      mem_load_retired.l1_miss                                      (56.36%)
+    15,605,701,802      inst_retired.any          #     4.26 L2MPKI                   (55.65%)
+        66,489,043      mem_load_retired.l2_miss                                      (55.14%)
+    15,547,654,451      inst_retired.any          #     2.24 L3MPKI                   (54.74%)
+        34,758,323      mem_load_retired.l3_miss                                      (54.60%)
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/512k/built':
+    14,072,355,231      inst_retired.any          #    18.83 L2MPKI_All
+                                                  #     5.49 L2HPKI_All               (55.16%)
+       264,999,055      l2_rqsts.miss                                                 (55.27%)
+       342,252,958      l2_rqsts.references                                           (55.55%)
+    13,892,173,635      inst_retired.any          #     4.55 L1MPKI                   (55.72%)
+        63,269,904      mem_load_retired.l1_miss                                      (56.14%)
+    14,016,947,465      inst_retired.any          #     3.00 L2MPKI                   (56.00%)
+        41,990,744      mem_load_retired.l2_miss                                      (55.67%)
+    14,057,421,320      inst_retired.any          #     1.77 L3MPKI                   (55.51%)
+        24,931,461      mem_load_retired.l3_miss                                      (54.98%)
+
+# Benchmark size 1m
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/cay':
+    18,198,975,943      inst_retired.any          #    19.11 L2MPKI_All
+                                                  #     5.08 L2HPKI_All               (55.15%)
+       347,763,047      l2_rqsts.miss                                                 (55.46%)
+       440,222,073      l2_rqsts.references                                           (55.78%)
+    18,713,800,265      inst_retired.any          #     7.14 L1MPKI                   (56.00%)
+       133,637,509      mem_load_retired.l1_miss                                      (56.31%)
+    18,731,691,340      inst_retired.any          #     5.20 L2MPKI                   (55.90%)
+        97,471,680      mem_load_retired.l2_miss                                      (55.49%)
+    18,294,134,138      inst_retired.any          #     1.97 L3MPKI                   (55.08%)
+        36,078,463      mem_load_retired.l3_miss                                      (54.84%)
+ Performance counter stats for './cay.test -test.run=^$ -test.cpu 1 -test.count 1 -test.bench read_id/1m/built':
+    15,527,809,018      inst_retired.any          #    20.74 L2MPKI_All
+                                                  #     5.44 L2HPKI_All               (54.94%)
+       322,099,956      l2_rqsts.miss                                                 (55.41%)
+       406,510,919      l2_rqsts.references                                           (55.75%)
+    16,020,021,219      inst_retired.any          #     4.95 L1MPKI                   (56.18%)
+        79,351,682      mem_load_retired.l1_miss                                      (56.51%)
+    16,109,739,903      inst_retired.any          #     3.45 L2MPKI                   (56.07%)
+        55,573,102      mem_load_retired.l2_miss                                      (55.47%)
+    15,846,374,536      inst_retired.any          #     1.74 L3MPKI                   (55.09%)
+        27,608,897      mem_load_retired.l3_miss                                      (54.59%)
+
+```
+
+
+
 
 ## 2022-08-18 Comparing TLB and cache misses between builtin and cay
 
